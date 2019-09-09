@@ -6,6 +6,103 @@ import numpy as np
 import soft_renderer.functional as srf
 
 
+def row_wise_vector_product(var_1, var_2, dim=0):
+    # temporal pytorch util
+    # compute row/col-wise vector product
+    # assume input are 2D pytorch variable / tensor
+    if dim == 0:
+        d = var_1.size(1)
+        E = torch.bmm(var_1.view(-1, 1, d), var_2.view(-1, d, 1)).squeeze()
+    elif dim == 1:
+        d = var_1.size(0)
+        E = torch.bmm(var_1.transpose(0, 1).contiguous().view(-1, 1, d),
+                      var_2.transpose(0, 1).contiguous().view(-1, d, 1)).squeeze()
+    else:
+        E = None
+    return E
+
+class SphericalHarmonicsLighting(nn.Module):
+    # using 9 component spherical harmonic coefficents for each color
+    # based on representation in [1] "An Efficient Representation for Irradiance Environment Maps" by Ravi Ramamoorthi and Pat Hanrahan
+    def __init__(self):
+        super(SphericalHarmonicsLighting, self).__init__()
+
+        # constants from eq. 12 in [1]
+        self.c_ = np.array([0.429043, 0.511664, 0.743125, 0.886227, 0.247708])
+
+        # transform for the transform matrix "M" as in eq. 11 in [1]
+        from scipy.sparse import coo_matrix
+        rows = np.array(list(range(0, 16)) + [15])
+        cols = np.array([8, 4, 7, 3, 4, 8, 5, 1, 7, 5, 6, 2, 3, 1, 2, 0, 6])
+        vals = np.array([self.c_[0], self.c_[0], self.c_[0], self.c_[1]]
+                        + [self.c_[0], -self.c_[0], self.c_[0], self.c_[1]]
+                        + [self.c_[0], self.c_[0], self.c_[2], self.c_[1]]
+                        + [self.c_[1], self.c_[1], self.c_[1], self.c_[3], -self.c_[4]])
+
+        T_np_sparse = coo_matrix((vals, (rows, cols)), shape=(16, 9))
+        T_np = T_np_sparse.toarray()
+        self.T_ = Variable(torch.FloatTensor(T_np), requires_grad=False)
+        self.dtype_ = torch.FloatTensor
+
+    def compute_irradiance_transfrom(self, sh_coeffs):
+        # create transform matrix "M" as in eq. 11 in [1]
+        # note: only for one color
+
+        M = torch.mm(self.T_, sh_coeffs.view(-1, 1))
+        M2 = M.view(4, 4)
+        # Variable( torch.zeros(4,4), requires_grad=False ) # todo: require grad?
+        # M[0][0] = self.c_[0] * sh_coeffs[8];  M[0][1] = self.c_[0] * sh_coeffs[4]
+        # M[1][0] = self.c_[0] * sh_coeffs[4];  M[1][1] = -self.c_[0] * sh_coeffs[8]
+        # M[2][0] = self.c_[0] * sh_coeffs[7];  M[2][1] = self.c_[0] * sh_coeffs[5]
+        # M[3][0] = self.c_[1] * sh_coeffs[3];  M[3][1] = self.c_[1] * sh_coeffs[1]
+        # M[0][2] = self.c_[0] * sh_coeffs[7];  M[0][3] = self.c_[1] * sh_coeffs[3]
+        # M[1][2] = self.c_[0] * sh_coeffs[5];  M[1][3] = self.c_[1] * sh_coeffs[1]
+        # M[2][2] = self.c_[2] * sh_coeffs[6];  M[2][3] = self.c_[1] * sh_coeffs[2]
+        # M[3][2] = self.c_[1] * sh_coeffs[2];  M[3][3] = self.c_[3] * sh_coeffs[0] - self.c_[4] * sh_coeffs[6]
+        return M2
+
+    def compute_irradiance(self, normals_aug, sh_coeffs):
+        # evaluate eq. 11 in [1], for one color
+        # sh_coeffs in size (9,) for one color
+        # assume normals_aug, size (V,4), are normals in camera coordinates
+
+        M = self.compute_irradiance_transfrom(sh_coeffs)
+        N = normals_aug
+        MN = torch.mm(M, N.transpose(0, 1))
+
+        # E = torch.bmm( MN.transpose(0,1).contiguous().view(-1,1,4), N.view(-1,4,1) ).squeeze()
+        MN_t = MN.transpose(0, 1).contiguous()
+        E = row_wise_vector_product(MN_t, N, dim=0)
+
+        return E
+
+    def forward(self, per_vertex_albedo, normals, sh_coeffs):
+            # per_vertex_albedo, in size (V,3) or (V*3,)
+            # normals, size (V,3), are normals in camera coordinates
+            # sh_coeffs, size (27,), coefficients for r, g, b
+
+            # augment the normals
+        v_num = normals.size(0)
+        ones = Variable(torch.ones(v_num, 1),
+                        requires_grad=False).type(self.dtype_)
+        normals_aug = torch.cat((normals, ones), dim=1)
+
+        # compute irradiance
+        E_red = self.compute_irradiance(normals_aug, sh_coeffs[0:9])
+        E_green = self.compute_irradiance(normals_aug, sh_coeffs[9:18])
+        E_blue = self.compute_irradiance(normals_aug, sh_coeffs[18:27])
+        E_rgb = torch.cat(
+            (E_red.view(-1, 1), E_green.view(-1, 1), E_blue.view(-1, 1)), dim=1)
+
+        # compute radiosity
+        # B = torch.mul( per_vertex_albedo.view(-1,3), E_rgb )
+        B = per_vertex_albedo.view(-1, 3) * E_rgb
+
+        # todo: add clipping function (constrain radiosity range to [0,1])
+        # torch.clamp(input, min, max, out=None) -> Tensor
+
+        return B
+
 class AmbientLighting(nn.Module):
     def __init__(self, light_intensity=0.5, light_color=(1,1,1)):
         super(AmbientLighting, self).__init__()
