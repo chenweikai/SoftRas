@@ -88,7 +88,7 @@ class SoftRenderer(nn.Module):
     def set_texture_mode(self, mode):
         assert mode in ['vertex', 'surface'], 'Mode only support surface and vertex'
 
-        self.lighting.light_mode = mode
+        #self.lighting.light_mode = mode
         self.rasterizer.texture_type = mode
 
     def render_mesh(self, mesh, mode=None):

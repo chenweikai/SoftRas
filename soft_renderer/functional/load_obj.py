@@ -27,15 +27,15 @@ def load_mtl(filename_mtl):
 
 def load_textures(filename_obj, filename_mtl, texture_res):
     # load vertices
-    vertices = []
+    texture_coord = []
     with open(filename_obj) as f:
         lines = f.readlines()
     for line in lines:
         if len(line.split()) == 0:
             continue
         if line.split()[0] == 'vt':
-            vertices.append([float(v) for v in line.split()[1:3]])
-    vertices = np.vstack(vertices).astype(np.float32)
+            texture_coord.append([float(v) for v in line.split()[1:3]])
+    texture_coord = np.vstack(texture_coord).astype(np.float32)
 
     # load faces for textures
     faces = []
@@ -65,7 +65,7 @@ def load_textures(filename_obj, filename_mtl, texture_res):
         if line.split()[0] == 'usemtl':
             material_name = line.split()[1]
     faces = np.vstack(faces).astype(np.int32) - 1
-    faces = vertices[faces]
+    faces = texture_coord[faces]
     faces = torch.from_numpy(faces).cuda()
     faces[1 < faces] = faces[1 < faces] % 1
 

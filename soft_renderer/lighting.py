@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pdb
 
 import soft_renderer.functional as srf
 
@@ -42,7 +43,8 @@ class SphericalHarmonicsLighting(nn.Module):
 
         T_np_sparse = coo_matrix((vals, (rows, cols)), shape=(16, 9))
         T_np = T_np_sparse.toarray()
-        self.T_ = Variable(torch.FloatTensor(T_np), requires_grad=False)
+        # self.T_ = Variable(torch.FloatTensor(T_np), requires_grad=False)
+        self.T_ = torch.FloatTensor(T_np)
         self.dtype_ = torch.FloatTensor
 
     def compute_irradiance_transfrom(self):
@@ -86,8 +88,7 @@ class SphericalHarmonicsLighting(nn.Module):
 
         device = light.device
         v_num = normals.size(0)
-        ones = Variable(torch.ones(v_num, 1),
-                        requires_grad=False).type(self.dtype_)
+        ones = torch.ones(v_num, 1, requires_grad=False, type = self.dtype_)
         normals_aug = torch.cat((normals, ones), dim=1)
 
         # compute irradiance

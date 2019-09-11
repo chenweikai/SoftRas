@@ -9,6 +9,7 @@ import tqdm
 import numpy as np
 import imageio
 import argparse
+import pdb
 
 import soft_renderer as sr
 
@@ -35,7 +36,7 @@ def main():
                             load_texture=True, texture_res=5, texture_type='surface')
 
     # create renderer with SoftRas
-    renderer = sr.SoftRenderer(camera_mode='look_at')
+    renderer = sr.SoftRenderer(light_mode='sh', camera_mode='look_at')
 
     os.makedirs(args.output_dir, exist_ok=True)
 
