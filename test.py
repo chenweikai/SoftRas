@@ -36,10 +36,44 @@ def test():
 
 
 if __name__ == '__main__':
-    a = np.floor(10*np.random.randn(3,4))
-    print(type(a))
-    b = a.ravel()
-    print(b)
-    c = b.reshape(6,2)
-    print(c)
-    #test()
+    # a = np.floor(10*np.random.randn(3,4))
+    # print(type(a))
+    # b = a.ravel()
+    # print(b)
+    # c = b.reshape(6,2)
+    # print(c)
+    import torch
+    a = torch.FloatTensor(np.arange(16).reshape(4,4))
+    # print(a)
+    normal = torch.FloatTensor(np.random.randn(4,1))
+    normal_T = normal.transpose(0,1)
+    print(normal)
+    print(normal_T)
+
+    single_output = torch.mm(a, normal)
+    single_final = torch.mm(normal_T, single_output)
+    print(single_output) 
+    print(single_final)
+    # print(normal)
+    # print(normal.size())
+
+    
+    # print(normal)
+    # print(normal.size())
+    batch_size = 5
+    normal = normal[None, :, :]
+    normal_T = normal_T[None, :, :].repeat(batch_size, 1, 1,)
+    c = normal.repeat(batch_size, 1, 1)
+    # print(normal)
+    # print(c)
+    # print(c.size())
+
+    a = a[None, :, :].repeat(batch_size, 1, 1)
+    output = torch.bmm(a, c)
+    print(output)
+    output_final = torch.bmm(normal_T, output)
+    print(output_final)
+    print(output_final.size())
+    output_final.squeeze_()
+    print(output_final.size())
+ 
