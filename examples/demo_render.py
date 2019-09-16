@@ -21,7 +21,7 @@ data_dir = os.path.join(current_dir, '../data')
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--filename-input', type=str, 
-        default=os.path.join(data_dir, 'obj/spot/spot_triangulated.obj'))
+        default=os.path.join(data_dir, 'obj/spot/spot_triangulated1.obj'))
     parser.add_argument('-o', '--output-dir', type=str, 
         default=os.path.join(data_dir, 'results/output_render'))
     args = parser.parse_args()
@@ -33,7 +33,7 @@ def main():
 
     # load from Wavefront .obj file
     mesh = sr.Mesh.from_obj(args.filename_input,
-                            load_texture=True, texture_res=5, texture_type='surface')
+                            load_texture=True, texture_res=5, texture_type='vertex')
 
     # create renderer with SoftRas
     renderer = sr.SoftRenderer(light_mode='sh', camera_mode='look_at')

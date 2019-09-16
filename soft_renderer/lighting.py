@@ -6,11 +6,27 @@ import pdb
 
 import soft_renderer.functional as srf
 
+def batch_row_wise_vector_product(in_1, in_2):
+    # in_1: batch_size * V_num * 4; in_2: batch_size * 4 * V_num
+    # each vertex has an augmented normal (x, y, z, 1)
+    # we want to compute the dot product for each vertex
+    # hence the output size is: batch_size * V_num
+    dim = in_1.size(0)
+    tmp = []
+    for i in range(dim):
+        tmp_1 = in_1[i, :, :].squeeze_()
+        tmp_2 = in_2[i, :, :].squeeze_()
+        tmp.append(row_wise_vector_product(tmp_1, tmp_2))
+    output = torch.stack(tmp, 0)
+    return output
+
 
 def row_wise_vector_product(var_1, var_2, dim=0):
     # temporal pytorch util
     # compute row/col-wise vector product
     # assume input are 2D pytorch variable / tensor
+    # var_1: M * N; var_2: N * M
+    # if dim==0, output size is M; if dim==1, output size is N
     if dim == 0:
         d = var_1.size(1)
         E = torch.bmm(var_1.view(-1, 1, d), var_2.view(-1, d, 1)).squeeze()
@@ -45,58 +61,55 @@ class SphericalHarmonicsLighting(nn.Module):
         T_np = T_np_sparse.toarray()
         # self.T_ = Variable(torch.FloatTensor(T_np), requires_grad=False)
         self.T_ = torch.FloatTensor(T_np)
-        self.dtype_ = torch.float64
+        self.dtype_ = torch.cuda.FloatTensor
 
-    def compute_irradiance_transfrom(self):
+    def compute_irradiance_transfrom(self, sh_coeffs):
         # create transform matrix "M" as in eq. 11 in [1]
         # note: only for one color
-
-        M = torch.mm(self.T_, self.sh_coeffs.view(-1, 1))
+        shCoeffs = torch.FloatTensor(sh_coeffs).cuda()
+        M = torch.mm(self.T_.cuda(), shCoeffs.view(-1, 1))
         M2 = M.view(4, 4)
-        # Variable( torch.zeros(4,4), requires_grad=False ) # todo: require grad?
-        # M[0][0] = self.c_[0] * sh_coeffs[8];  M[0][1] = self.c_[0] * sh_coeffs[4]
-        # M[1][0] = self.c_[0] * sh_coeffs[4];  M[1][1] = -self.c_[0] * sh_coeffs[8]
-        # M[2][0] = self.c_[0] * sh_coeffs[7];  M[2][1] = self.c_[0] * sh_coeffs[5]
-        # M[3][0] = self.c_[1] * sh_coeffs[3];  M[3][1] = self.c_[1] * sh_coeffs[1]
-        # M[0][2] = self.c_[0] * sh_coeffs[7];  M[0][3] = self.c_[1] * sh_coeffs[3]
-        # M[1][2] = self.c_[0] * sh_coeffs[5];  M[1][3] = self.c_[1] * sh_coeffs[1]
-        # M[2][2] = self.c_[2] * sh_coeffs[6];  M[2][3] = self.c_[1] * sh_coeffs[2]
-        # M[3][2] = self.c_[1] * sh_coeffs[2];  M[3][3] = self.c_[3] * sh_coeffs[0] - self.c_[4] * sh_coeffs[6]
+    
         return M2
 
-    def compute_irradiance(self, normals_aug):
+    def compute_irradiance(self, normals_aug, sh_coeffs):
         # evaluate eq. 11 in [1], for one color
         # sh_coeffs in size (9,) for one color
-        # assume normals_aug, size (V,4), are normals in camera coordinates
+        # assume normals_aug, size (batch_size, V,4), are normals in camera coordinates
 
-        M = self.compute_irradiance_transfrom(self.sh_coeffs)
-        N = normals_aug
-        MN = torch.mm(M, N.transpose(0, 1))
+        M = self.compute_irradiance_transfrom(sh_coeffs)
+        M = M[None, :, :] # 1 * 4 * 4
+        batch_size = normals_aug.size(0)
+        M = M.expand(batch_size, M.size(1), M.size(2)) # batch_size * 4 * 4
+        N = normals_aug # batch_size * V_num * 4
+        MN = torch.bmm(M, N.transpose(1, 2))  # batch_size * 4 * V_num
 
-        # E = torch.bmm( MN.transpose(0,1).contiguous().view(-1,1,4), N.view(-1,4,1) ).squeeze()
-        MN_t = MN.transpose(0, 1).contiguous()
-        E = row_wise_vector_product(MN_t, N, dim=0)
+        E = batch_row_wise_vector_product(N, MN)
+
+        # MN_t = MN.transpose(1, 2).contiguous()       
+        # E = row_wise_vector_product(MN_t, N, dim=0)
 
         return E
 
     def forward(self, light, normals):
-        # per_vertex_albedo, in size (V,3) or (V*3,)
-        # normals, size (V,3), are normals in camera coordinates
+        # normals, size (batch_size, V,3), are normals in camera coordinates
         # sh_coeffs, size (27,), coefficients for r, g, b
 
         # augment the normals
 
         device = light.device
-        v_num = normals.size(0)
-        ones = torch.ones(v_num, 1, requires_grad=False, dtype = self.dtype_)
-        normals_aug = torch.cat((normals, ones), dim=1)
+        batch_size = normals.size(0)
+        v_num = normals.size(1)
+        ones = torch.ones(v_num, 1, requires_grad=False).cuda()
+        ones = ones[None, :, :]
+        normals_aug = torch.cat((normals, ones), dim=2)
 
         # compute irradiance
         E_red = self.compute_irradiance(normals_aug, self.sh_coeffs[0:9])
         E_green = self.compute_irradiance(normals_aug, self.sh_coeffs[9:18])
         E_blue = self.compute_irradiance(normals_aug, self.sh_coeffs[18:27])
         E_rgb = torch.cat(
-            (E_red.view(-1, 1), E_green.view(-1, 1), E_blue.view(-1, 1)), dim=1)
+            (E_red.view(batch_size, -1, 1), E_green.view(batch_size, -1, 1), E_blue.view(batch_size, -1, 1)), dim=2)
 
         # compute radiosity - disable radiosity computation for now
         # B = torch.mul( per_vertex_albedo.view(-1,3), E_rgb )
@@ -171,9 +184,18 @@ class Lighting(nn.Module):
             mesh.textures = mesh.textures * light
 
         elif self.light_mode == 'sh':
-            light = torch.zeros_like(mesh.vertices, dtype=torch.float32).to(mesh.device)
+            light = torch.zeros_like(mesh.faces, dtype=torch.float32).to(mesh.device)
             light = light.contiguous()
             light = self.sh(light, mesh.vertex_normals)
-            mesh.textures = mesh.textures * light
+            mesh.textures = mesh.textures * light#[:, :, None, :]
+            # print(mesh.textures)
+            # clip and normalize to [0, 1]
+            mesh.textures = torch.clamp(mesh.textures, min=0.0)
+            # print(mesh.textures)
+            max_v = torch.max(mesh.textures)
+            # print(max_v)
+            scale = 1.0 / max_v
+            mesh.textures = mesh.textures * scale
+            # print(mesh.textures)
 
         return mesh

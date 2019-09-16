@@ -2,7 +2,7 @@ from . import functional
 from .mesh import Mesh
 from .renderer import Renderer, SoftRenderer
 from .transform import Projection, LookAt, Look, Transform
-from .lighting import AmbientLighting, DirectionalLighting, Lighting
+from .lighting import SphericalHarmonicsLighting, AmbientLighting, DirectionalLighting, Lighting
 from .rasterizer import SoftRasterizer
 from .losses import LaplacianLoss, FlattenLoss
 
